@@ -1,0 +1,12 @@
+node_modules/
+*.cfg
+*.bat
+*.exe
+*.eslintcache
+application-build-*
+.DS_Store
+client/dist
+client/build
+client/ssr_build
+lambda/*.zip
+client/.eslintcache
