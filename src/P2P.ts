@@ -402,6 +402,13 @@ export class P2P {
         this.AudioOut?.UnMute();
     }
 
+    public CheckConnection = (user_guid: string) => {
+        const UserConn = this.Connections.get(user_guid);
+        if (UserConn) {
+            UserConn.CheckConnection(this.CurrentUser.streams);
+        }
+    }
+
     private OnStatusChange = (user_guid:string) => (status: "connected" | "disconnected") => {
         let user = this.Users.get(user_guid);
         if (user) {
