@@ -30,7 +30,7 @@ declare global {
     }
 }
 
-let use_logs = true;
+let use_logs = false;
 const logout = (...args: any) => use_logs && console.log(...args);
 
 type Props = {
