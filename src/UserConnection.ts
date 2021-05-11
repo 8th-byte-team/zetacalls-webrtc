@@ -2,7 +2,7 @@ import CreateWebRTC from './CreateWebRTC';
 import { Messages, transmitMessage } from './Messages';
 import { StreamType, Credentials, DescriptionPayload, ICEPayload, StreamMap } from './model';
 
-let use_logs = false;
+let use_logs = true;
 const logout = (...args: any) => use_logs && console.log(...args);
 
 export class UserConnection {
