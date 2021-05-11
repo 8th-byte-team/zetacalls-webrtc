@@ -106,6 +106,18 @@ export class UserConnection {
         this.DataChannel = null;
     }
 
+    public CheckConnection = (streams:Record<StreamType, MediaStream | null>) => {
+        if (
+            this.RTC && (
+                this.RTC.connectionState === "closed" || 
+                this.RTC.connectionState === "disconnected" ||
+                this.RTC.connectionState === "failed"
+            )
+        ) {
+            this.BeginConnetion(streams);
+        }
+    }
+
     private async InitRTC(guid?: string) {
         this.GUID = guid || this.GenerateID();
         logout("Created conn with user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
@@ -141,7 +153,7 @@ export class UserConnection {
         }
     }
 
-    private OwnerNegotiation = async () => {
+    private PerformNegotiation = async () => {
         if (this.RTC) {
             if (this.RTC.signalingState === "stable" && !this.Making) {
                 this.Making = true;
@@ -270,7 +282,7 @@ export class UserConnection {
     private OnRTCNegotiationNeeded = async () => {
         logout("Negotiation needed for user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
         try {
-            await this.OwnerNegotiation();   
+            await this.PerformNegotiation();   
         } catch (error) {
             console.log(error);
         }
