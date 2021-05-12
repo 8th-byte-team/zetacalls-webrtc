@@ -323,7 +323,9 @@ export class P2P {
             CurrentUser.streams[StreamType.BluredVideo] = null;
             this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
             this.Connections.forEach(conn => conn.SetStream(StreamType.Video, null));
-            this.Connections.forEach(conn => conn.SetStream(StreamType.Video, CurrentUser.streams[StreamType.Video]));
+            if (CurrentUser.streams[StreamType.Video]) {
+                this.Connections.forEach(conn => conn.SetStream(StreamType.Video, CurrentUser.streams[StreamType.Video]));
+            }
             this.OnChange();
         } else if (status === undefined || status === true) {
             this.BlurCameraBackground = true;
@@ -344,8 +346,14 @@ export class P2P {
     }
 
     private OnLoadVideoForBlur = async() => {
+        const canvas = document.getElementById(`room-video-tsf-${this.RoomGUID}`) as CanvasElement | null;
         const video = document.getElementById(`room-video-out-${this.RoomGUID}`) as HTMLVideoElement;
-        if (this.BlurCameraBackground && video) {
+        if (this.BlurCameraBackground && video && canvas) {
+            video.width = video.videoWidth;
+            video.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
             video.removeEventListener("loadeddata", this.OnLoadVideoForBlur);
             tfjs.getBackend();
             const res = await bodyPix.load({
@@ -379,6 +387,7 @@ export class P2P {
                         );   
                     } catch (error) {
                         console.log(error);
+                        this.toggle_blur_video_background(false);
                     }
                 }
             }
