@@ -6,6 +6,7 @@ export enum StreamType {
     Audio = 1,
     Video,
     Screen,
+    BluredVideo,
 }
 
 export const StreamNames:Partial<Record<StreamType, PermissionName>> = {

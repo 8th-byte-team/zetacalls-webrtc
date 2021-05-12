@@ -18,10 +18,16 @@ import {
     EncryptedMessage,
     WarningMessage,
 } from './model';
+import * as tfjs from '@tensorflow/tfjs';
+import * as bodyPix from '@tensorflow-models/body-pix';
 
 declare global {
     interface MediaDevices {
         getDisplayMedia(constraints?: MediaStreamConstraints): Promise<MediaStream>;
+    }
+
+    interface CanvasElement extends HTMLCanvasElement {
+        captureStream(frameRate?: number): MediaStream;
     }
   
     interface MediaTrackConstraintSet {
@@ -65,6 +71,7 @@ export class P2P {
         audio_out: undefined,
         video_in:  undefined,
     };
+    public BlurCameraBackground = false;
 
     constructor(props: Props) {
         this.OnChange            = () => {
@@ -114,7 +121,12 @@ export class P2P {
                 });
                 CurrentUser.streams[type] = stream;
     
-                this.Connections.forEach(conn => conn.SetStream(type, stream));
+                if (this.BlurCameraBackground) {
+                    this.StartBluredVideo();
+                } else {
+                    this.Connections.forEach(conn => conn.SetStream(type, stream));
+                }
+
                 this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
                 this.OnChange();
             } catch(e) {}
@@ -129,120 +141,11 @@ export class P2P {
 
         if (type === StreamType.Audio) {
             this.toggle_audio();
-            return;
+        } else if (type === StreamType.Video) {
+            this.toggle_video();
+        } else if (type === StreamType.Screen) {
+            this.toggle_sharing();
         }
-
-        const CurrentUser = this.CurrentUser;
-        let stream:MediaStream | null = null;
-
-        const StreamName = StreamNames[type];
-
-        if (CurrentUser.streams[type]) {
-            logout(`Found active stream ${StreamName}. Stopping`);
-            CurrentUser.streams[type]?.getTracks().forEach(track => {
-                CurrentUser.streams[type]?.removeTrack(track);
-                track.stop();
-            });
-
-            CurrentUser.streams[type] = null;
-        } else {
-            logout(`Stream ${StreamName} not found. Getting new stream`)
-            try {
-                if (type === StreamType.Video) {
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        video: this.SelectedDevices.video_in ? {
-                            deviceId: this.SelectedDevices.video_in.deviceId,
-                        } : true
-                    });
-
-                    if (CurrentUser.streams[StreamType.Screen]) {
-                        CurrentUser.streams[StreamType.Screen]?.getTracks().forEach(track => {
-                            CurrentUser.streams[StreamType.Screen]?.removeTrack(track);
-                            track.stop();
-                        });
-
-                        CurrentUser.streams[StreamType.Screen] = null;
-                    }
-                } else if (type === StreamType.Screen) {
-                    stream = await navigator.mediaDevices.getDisplayMedia({
-                        video: true,
-                    });
-
-                    // handle browser button "Stop sharing"
-                    stream.getVideoTracks()[0].onended = () => {
-                        this.StopUserStream(StreamType.Screen)
-                    };
-
-                    if (CurrentUser.streams[StreamType.Video]) {
-                        CurrentUser.streams[StreamType.Video]?.getTracks().forEach(track => {
-                            CurrentUser.streams[StreamType.Video]?.removeTrack(track);
-                            track.stop();
-                        });
-
-                        CurrentUser.streams[StreamType.Video] = null;
-                    }
-                }
-            } catch (error) {
-                logout("Stream error: ", error);
-                this.OnWarning({
-                    title: `Failed to get available devices`,
-                    body:  `Media device error`,
-                });
-            }
-
-            CurrentUser.streams[type] = stream;
-        }
-
-        this.Connections.forEach(conn => conn.SetStream(type, stream));
-        this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
-        this.OnChange();
-    }
-
-    private toggle_audio = async () => {
-        if (!this.started) {
-            console.error("WebRTC is not started");
-            return;
-        }
-
-        if (this.AudioStream) {
-            let status = false;
-            if (this.AudioStream.getAudioTracks().find(t => !t.enabled)) {
-                this.AudioStream.getAudioTracks().forEach(track => {
-                    track.enabled = true;
-                });
-                status = true;
-            } else {
-                this.AudioStream.getAudioTracks().forEach(track => {
-                    track.enabled = false;
-                });
-                status = false;
-            }
-
-            this.EmitNewAudioStreamStatus(status);
-        } else {
-            if (this.CurrentUser.streams[StreamType.Audio]) {
-                this.CurrentUser.streams[StreamType.Audio]?.getTracks().forEach(track => {
-                    this.CurrentUser.streams[StreamType.Audio]?.removeTrack(track);
-                    track.stop();
-                });
-                this.Connections.forEach(conn => conn.SetStream(StreamType.Audio, null));
-                this.Users = this.Users.set(this.CurrentUser.guid, ImmuUpdate(
-                    this.CurrentUser,
-                    {"streams": {[StreamType.Audio]: {"$set": null}}}
-                ));
-            } else {
-                try {
-                    this.UpdateAudioStreamWithDeviceID(this.SelectedDevices.audio_in?.deviceId || "", true)
-                } catch (error) {
-                    this.OnWarning({
-                        title: `Failed to get available devices`,
-                        body:  `Media device error`,
-                    });
-                }
-            }
-        }
-
-        this.OnChange();
     }
 
     public select_devices = async (audio_in?: MediaDeviceInfo, audio_out?: MediaDeviceInfo, video_in?: MediaDeviceInfo) => {
@@ -381,11 +284,13 @@ export class P2P {
 
         this.CurrentUser.streams[StreamType.Audio]?.getTracks().forEach(track => { track.stop(); });
         this.CurrentUser.streams[StreamType.Video]?.getTracks().forEach(track => { track.stop(); });
+        this.CurrentUser.streams[StreamType.BluredVideo]?.getTracks().forEach(track => { track.stop(); });
         this.CurrentUser.streams[StreamType.Screen]?.getTracks().forEach(track => { track.stop(); });
         this.AudioStream?.getTracks().forEach(track => { track.stop(); });
 
         this.CurrentUser.streams[StreamType.Audio] = null;
         this.CurrentUser.streams[StreamType.Video] = null;
+        this.CurrentUser.streams[StreamType.BluredVideo] = null;
         this.CurrentUser.streams[StreamType.Screen] = null;
         this.AudioStream = null;
         this.AudioOut?.Destructor();
@@ -408,6 +313,225 @@ export class P2P {
             UserConn.CheckConnection(this.CurrentUser.streams);
         }
     }
+
+    public toggle_blur_video_background = async (status?: boolean) => {
+        if (this.BlurCameraBackground && (status === undefined || status === false)) {
+            this.BlurCameraBackground = false;
+            this.StopStreamTracks(StreamType.BluredVideo);
+
+            const CurrentUser = this.CurrentUser;
+            CurrentUser.streams[StreamType.BluredVideo] = null;
+            this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
+            this.Connections.forEach(conn => conn.SetStream(StreamType.Video, null));
+            this.Connections.forEach(conn => conn.SetStream(StreamType.Video, CurrentUser.streams[StreamType.Video]));
+            this.OnChange();
+        } else if (status === undefined || status === true) {
+            this.BlurCameraBackground = true;
+            this.StartBluredVideo();
+        }
+    }
+
+    private StartBluredVideo = () => {
+        const CurrentUser = this.CurrentUser;
+        if (CurrentUser.streams[StreamType.Video]) {
+            const video = document.getElementById(`room-video-out-${this.RoomGUID}`) as HTMLVideoElement;
+            if (video) {
+                video.addEventListener("loadeddata", this.OnLoadVideoForBlur);
+
+                video.srcObject = CurrentUser.streams[StreamType.Video];
+            }
+        }
+    }
+
+    private OnLoadVideoForBlur = async() => {
+        const video = document.getElementById(`room-video-out-${this.RoomGUID}`) as HTMLVideoElement;
+        if (this.BlurCameraBackground && video) {
+            video.removeEventListener("loadeddata", this.OnLoadVideoForBlur);
+            tfjs.getBackend();
+            const res = await bodyPix.load({
+                architecture: 'MobileNetV1',
+                outputStride: 16,
+                multiplier:   0.75,
+                quantBytes:   2
+            });
+            this.PerformBodyPix(res);
+        }
+    }
+
+    private PerformBodyPix = async (bdp: bodyPix.BodyPix) => {
+        const canvas = document.getElementById(`room-video-tsf-${this.RoomGUID}`) as CanvasElement | null;
+        if (canvas) {
+            const stream = canvas.captureStream(30);
+            this.OnGotBluredStream(stream);
+        
+            while (this.BlurCameraBackground) {
+                const video = document.getElementById(`room-video-out-${this.RoomGUID}`) as HTMLVideoElement | null;
+                if (video) {
+                    const segmentation = await bdp.segmentPerson(video);
+                    try {
+                        bodyPix.drawBokehEffect(
+                            canvas,
+                            video,
+                            segmentation,
+                            9,
+                            14,
+                            false,
+                        );   
+                    } catch (error) {
+                        console.log(error);
+                    }
+                }
+            }
+        }
+    }
+
+    private OnGotBluredStream = (stream: MediaStream) => {
+        const CurrentUser = this.CurrentUser;
+        CurrentUser.streams[StreamType.BluredVideo] = stream;
+
+        this.Connections.forEach(conn => conn.SetStream(StreamType.Video, null));
+        this.Connections.forEach(conn => conn.SetStream(StreamType.Video, stream));
+        this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
+        this.OnChange();
+    }
+
+    private toggle_audio = async () => {
+        if (!this.started) {
+            console.error("WebRTC is not started");
+            return;
+        }
+
+        if (this.AudioStream) {
+            let status = false;
+            if (this.AudioStream.getAudioTracks().find(t => !t.enabled)) {
+                this.AudioStream.getAudioTracks().forEach(track => {
+                    track.enabled = true;
+                });
+                status = true;
+            } else {
+                this.AudioStream.getAudioTracks().forEach(track => {
+                    track.enabled = false;
+                });
+                status = false;
+            }
+
+            this.EmitNewAudioStreamStatus(status);
+        } else {
+            if (this.CurrentUser.streams[StreamType.Audio]) {
+                this.CurrentUser.streams[StreamType.Audio]?.getTracks().forEach(track => {
+                    this.CurrentUser.streams[StreamType.Audio]?.removeTrack(track);
+                    track.stop();
+                });
+                this.Connections.forEach(conn => conn.SetStream(StreamType.Audio, null));
+                this.Users = this.Users.set(this.CurrentUser.guid, ImmuUpdate(
+                    this.CurrentUser,
+                    {"streams": {[StreamType.Audio]: {"$set": null}}}
+                ));
+            } else {
+                try {
+                    this.UpdateAudioStreamWithDeviceID(this.SelectedDevices.audio_in?.deviceId || "", true)
+                } catch (error) {
+                    this.OnWarning({
+                        title: `Failed to get available devices`,
+                        body:  `Media device error`,
+                    });
+                }
+            }
+        }
+
+        this.OnChange();
+    }
+
+    private toggle_video = async () => {
+        const CurrentUser = this.CurrentUser;
+        let stream:MediaStream | null = null;
+
+        if (CurrentUser.streams[StreamType.Video]) {
+            this.BlurCameraBackground = false;
+            this.StopStreamTracks(StreamType.Video);
+            this.StopStreamTracks(StreamType.BluredVideo);
+        } else {
+            logout(`Stream ${StreamNames[StreamType.Video]} not found. Getting new stream`)
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: this.SelectedDevices.video_in ? {
+                        deviceId: this.SelectedDevices.video_in.deviceId,
+                    } : true
+                });
+
+                if (CurrentUser.streams[StreamType.Screen]) {
+                    this.StopStreamTracks(StreamType.Screen);
+
+                    CurrentUser.streams[StreamType.Screen] = null;
+                    this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
+                }
+            } catch (error) {
+                logout("Stream error: ", error);
+                this.OnWarning({
+                    title: `Failed to get available devices`,
+                    body:  `Media device error`,
+                });
+            }
+        }
+
+        if (CurrentUser.streams[StreamType.BluredVideo]) {
+            CurrentUser.streams[StreamType.BluredVideo] = null;
+            this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
+        }
+
+        this.SetUserStream(StreamType.Video, stream);
+    }
+
+    private toggle_sharing = async () => {
+        const CurrentUser = this.CurrentUser;
+        let stream:MediaStream | null = null;
+
+        const StreamName = StreamNames[StreamType.Screen];
+
+        if (CurrentUser.streams[StreamType.Screen]) {
+            logout(`Found active stream ${StreamName}. Stopping`);
+            this.StopStreamTracks(StreamType.Screen);
+        } else {
+            logout(`Stream ${StreamName} not found. Getting new stream`)
+            try {
+                stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+
+                // handle browser button "Stop sharing"
+                stream.getVideoTracks()[0].onended = () => {
+                    this.StopUserStream(StreamType.Screen)
+                };
+
+                if (CurrentUser.streams[StreamType.Video]) {
+                    this.BlurCameraBackground = false;
+                    this.StopStreamTracks(StreamType.Video);
+                    this.StopStreamTracks(StreamType.BluredVideo);
+
+                    CurrentUser.streams[StreamType.Video] = null;
+                    CurrentUser.streams[StreamType.BluredVideo] = null;
+                    this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
+                }
+            } catch(err) {}
+        }
+
+        this.SetUserStream(StreamType.Screen, stream);
+    }
+
+    private StopStreamTracks = (type: StreamType) => {
+        const CurrentUser = this.CurrentUser;
+        CurrentUser.streams[type]?.getTracks().forEach(track => {
+            CurrentUser.streams[type]?.removeTrack(track);
+            track.stop();
+        });
+    }
+
+    private SetUserStream = (type: StreamType, stream: MediaStream | null) => {
+        const CurrentUser = this.CurrentUser;
+        CurrentUser.streams[type] = stream;
+        this.Connections.forEach(conn => conn.SetStream(type, stream));
+        this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
+        this.OnChange();
+    }
+
 
     private OnStatusChange = (user_guid:string) => (status: "connected" | "disconnected") => {
         let user = this.Users.get(user_guid);
@@ -587,7 +711,12 @@ export class P2P {
             CurrentUser.streams[type] = stream;
             
             this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
-            this.Connections.forEach(conn => conn.SetStream(StreamType.Audio, stream));    
+
+            if (this.BlurCameraBackground) {
+                this.StartBluredVideo();
+            } else {
+                this.Connections.forEach(conn => conn.SetStream(StreamType.Audio, stream));
+            }
         }
     }
 
