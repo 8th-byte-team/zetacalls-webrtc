@@ -20,6 +20,7 @@ import {
 } from './model';
 import * as tfjs from '@tensorflow/tfjs';
 import * as bodyPix from '@tensorflow-models/body-pix';
+import { logout } from "./utils";
 
 declare global {
     interface MediaDevices {
@@ -36,8 +37,7 @@ declare global {
     }
 }
 
-let use_logs = false;
-const logout = (...args: any) => use_logs && console.log(...args);
+let useLogs = false;
 
 type Props = {
     current_user: User,
@@ -233,7 +233,7 @@ export class P2P {
     }
 
     public InitConnection = (user_guid: string) => {
-        logout("Init user: ", user_guid, " Current: ", this.CurrentUser.guid)
+        logout(user_guid, useLogs, "Init connection")
         const conn = this.Connections.get(user_guid);
         if (conn) {
             conn.BeginConnetion(this.CurrentUser.streams);
@@ -331,6 +331,10 @@ export class P2P {
             this.BlurCameraBackground = true;
             this.StartBluredVideo();
         }
+    }
+
+    public GetUserConnection = (guid: string) => {
+        return this.Connections.get(guid);
     }
 
     private StartBluredVideo = () => {
@@ -460,7 +464,7 @@ export class P2P {
             this.StopStreamTracks(StreamType.Video);
             this.StopStreamTracks(StreamType.BluredVideo);
         } else {
-            logout(`Stream ${StreamNames[StreamType.Video]} not found. Getting new stream`)
+            logout(this.CurrentUserGUID, useLogs, `Stream ${StreamNames[StreamType.Video]} not found. Getting new stream`)
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: this.SelectedDevices.video_in ? {
@@ -475,7 +479,7 @@ export class P2P {
                     this.Users = this.Users.set(CurrentUser.guid, CurrentUser);
                 }
             } catch (error) {
-                logout("Stream error: ", error);
+                logout(this.CurrentUserGUID, useLogs, "Stream error: ", error);
                 this.OnWarning({
                     title: `Failed to get available devices`,
                     body:  `Media device error`,
@@ -498,10 +502,10 @@ export class P2P {
         const StreamName = StreamNames[StreamType.Screen];
 
         if (CurrentUser.streams[StreamType.Screen]) {
-            logout(`Found active stream ${StreamName}. Stopping`);
+            logout(this.CurrentUserGUID, useLogs, `Found active stream ${StreamName}. Stopping`);
             this.StopStreamTracks(StreamType.Screen);
         } else {
-            logout(`Stream ${StreamName} not found. Getting new stream`)
+            logout(this.CurrentUserGUID, useLogs, `Stream ${StreamName} not found. Getting new stream`)
             try {
                 stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
 
@@ -629,7 +633,7 @@ export class P2P {
     private OnOffer = async (msg: EncryptedMessage, reply?: (msg: EncryptedMessage) => void) => {
         const [ data ] = Decrypt(this.EncryptionKey, "p2p-offer", msg.message);
         if (!data) {
-            logout("Decryption error: key = "+this.EncryptionKey);
+            logout(this.CurrentUserGUID, useLogs, "Decryption error: key = "+this.EncryptionKey);
             return;
         }
 
@@ -642,7 +646,7 @@ export class P2P {
     private OnICE = (msg: EncryptedMessage) => {
         const [ data ] = Decrypt(this.EncryptionKey, "p2p-on-ice", msg.message);
         if (!data) {
-            logout("Decryption error: key = "+this.EncryptionKey);
+            logout(this.CurrentUserGUID, useLogs, "Decryption error: key = "+this.EncryptionKey);
             return;
         }
 

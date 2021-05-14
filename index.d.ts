@@ -1,0 +1,1 @@
+declare var __webrtc_logs:Map<string, string[]>

@@ -22,6 +22,7 @@
   },
   "include": [
     "index.ts",
+    "index.d.ts",
     "src",
   ]
 }

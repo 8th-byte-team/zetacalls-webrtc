@@ -1,9 +1,9 @@
 import CreateWebRTC from './CreateWebRTC';
 import { Messages, transmitMessage } from './Messages';
 import { StreamType, Credentials, DescriptionPayload, ICEPayload, StreamMap } from './model';
+import { logout } from './utils';
 
-let use_logs = false;
-const logout = (...args: any) => use_logs && console.log(...args);
+let useLogs = false;
 
 export class UserConnection {
     private Credentials:       Credentials;
@@ -15,19 +15,19 @@ export class UserConnection {
     private OnToggleUserAudio: (user_guid: string, status: boolean) => void;
     private OnOpenDataChannel: (user_guid: string) => void;
     private GUID:              string = "";
-    private RTC:               RTCPeerConnection | null = null;
+    public RTC:                RTCPeerConnection | null = null;
     private DataChannel:       RTCDataChannel | null = null;
     private SenderStreamMap:   StreamMap = {};
     private ReceiverStreamMap: StreamMap = {};
     private TrackSenders:      Record<number, RTCRtpSender> = {};
-    private Making =            false;
-    private AnsweringPending =  false;
-    private IgnoreOffer =       false;
-    private IsPolite =          true;
-    private CurrentUserGUID: string;
-    private OtherUserGUID:   string;
-    private Server:          string;
-    private GenerateID:      () => string;
+    public Making =            false;
+    public AnsweringPending =  false;
+    public IgnoreOffer =       false;
+    public IsPolite =          true;
+    private CurrentUserGUID:  string;
+    private OtherUserGUID:    string;
+    private Server:           string;
+    private GenerateID:       () => string;
 
     constructor(props: {
         current_user_guid:    string
@@ -67,7 +67,7 @@ export class UserConnection {
 
     public SetICE = (data: ICEPayload) => {
         if (this.RTC) {
-            //logout("Got ICE from user: ", data.user_guid, ". GUID: ", data.conn_guid);
+            //logout(useLogs, "Got ICE from user: ", data.user_guid, ". GUID: ", data.conn_guid);
             this.RTC.addIceCandidate(
                 new RTCIceCandidate(JSON.parse(data.candidate))
             )
@@ -120,7 +120,7 @@ export class UserConnection {
 
     private async InitRTC(guid?: string) {
         this.GUID = guid || this.GenerateID();
-        logout("Created conn with user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+        logout(this.OtherUserGUID, useLogs, "Created conn GUID: ", this.GUID);
     
         this.RTC = await CreateWebRTC(this.Server, this.Credentials.username, this.Credentials.password);
         this.RTC.addEventListener("icecandidate",               this.OnRTCICECandidate);
@@ -144,7 +144,7 @@ export class UserConnection {
                     stream_map[parseInt(type)] = {id: stream.id, enabled: !!stream.getTracks()[0].enabled};
                 }
             });
-            logout("Start RTC: ", stream_map);
+            logout(this.OtherUserGUID, useLogs, "Start RTC: ", stream_map);
             this.SenderStreamMap = stream_map;
             this.DataChannel = this.RTC.createDataChannel("main");
             this.DataChannel.addEventListener("close",   this.OnRTCDataChannelClose);
@@ -166,7 +166,7 @@ export class UserConnection {
 
                 //@ts-ignore
                 if (this.RTC.signalingState === "have-local-offer" && this.RTC.localDescription?.type === "offer") {
-                    logout("Sent offer to user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+                    logout(this.OtherUserGUID, useLogs, "Sent offer to user. Conn GUID: ", this.GUID);
                     this.SendOffer(this.OtherUserGUID, {
                         conn_guid:   this.GUID,
                         user_guid:   this.CurrentUserGUID,
@@ -181,7 +181,7 @@ export class UserConnection {
     }
 
     private StartRTCWithOfffer = async (data: DescriptionPayload, streams:Record<StreamType, MediaStream | null>) => {
-        logout("Got offer from user: ", data.user_guid, ". GUID: ", data.conn_guid);
+        logout(this.OtherUserGUID, useLogs, "Got offer from user. Conn GUID: ", data.conn_guid);
         if (!this.RTC) {
             await this.InitRTC(data.conn_guid);
 
@@ -192,7 +192,7 @@ export class UserConnection {
                     stream_map[parseInt(type)] = {id: stream.id, enabled: !!stream.getTracks()[0].enabled};
                 }
             });
-            logout("Start RTC: ", stream_map);
+            logout(this.OtherUserGUID, useLogs, "Start RTC: ", stream_map);
             this.SenderStreamMap = stream_map;
         }
 
@@ -205,12 +205,12 @@ export class UserConnection {
             this.IgnoreOffer = description.type === 'offer' && !this.IsPolite && (this.Making || !isStable);
 
             if (this.IgnoreOffer) {
-                logout('Glare - ignoring offer ', data.user_guid, ". GUID: ", data.conn_guid);
+                logout(this.OtherUserGUID, useLogs, "Glare - ignoring offer. Conn GUID: ", data.conn_guid);
                 return;
             }
 
             this.AnsweringPending = description.type === 'answer';
-            logout(`Set Remote Description (${description.type}) `, data.user_guid, ". GUID: ", data.conn_guid);
+            logout(this.OtherUserGUID, useLogs, `Set Remote Description (${description.type}). Conn GUID: `, data.conn_guid);
 
             this.ReceiverStreamMap = data.stream_map;
             await this.RTC.setRemoteDescription(description);
@@ -219,7 +219,7 @@ export class UserConnection {
 
             if (description.type === 'offer') {
                 if (this.RTC.signalingState === "have-remote-offer" && this.RTC.remoteDescription?.type === "offer") {
-                    logout('Set LocaL Description to get back to stable ', data.user_guid, ". GUID: ", data.conn_guid);
+                    logout(this.OtherUserGUID, useLogs, "Set LocaL Description to get back to stable. Conn GUID: ", data.conn_guid);
                     const answer = await this.RTC.createAnswer({
                         offerToReceiveAudio: true,
                         offerToReceiveVideo: true,
@@ -229,7 +229,7 @@ export class UserConnection {
                     
                     //@ts-ignore
                     if (this.RTC.signalingState === "stable" && this.RTC.localDescription?.type === "answer") {
-                        logout("Sent offer to user: ", data.user_guid, ". GUID: ", data.conn_guid);
+                        logout(this.OtherUserGUID, useLogs, "Sent offer to user. Conn GUID: ", data.conn_guid);
                         this.SendOffer(this.OtherUserGUID, {
                             conn_guid:   this.GUID,
                             user_guid:   this.CurrentUserGUID,
@@ -257,7 +257,7 @@ export class UserConnection {
 
     private OnRTCTrack = (event: RTCTrackEvent) => {
         const eventStream = event.streams[0];
-        logout("Got track from user: ", this.OtherUserGUID, ". GUID: ", this.GUID, " ID: ", eventStream?.id);
+        logout(this.OtherUserGUID, useLogs, "Got track from user. Conn GUID: ", this.GUID, " ID: ", eventStream?.id);
         const data = Object.entries(this.ReceiverStreamMap).find(
             ([ type, streamData ]) => streamData?.id === eventStream?.id
         );
@@ -271,7 +271,7 @@ export class UserConnection {
             });
 
             if (ReceiverStreamType === StreamType.Audio) {
-                logout("OnRTCTrack user_Guid: ", this.OtherUserGUID, "stream data:", StreamData)
+                logout(this.OtherUserGUID, useLogs, "OnRTCTrack Audio stream data:", StreamData)
                 eventStream.getTracks().forEach(t => t.enabled = !!StreamData?.enabled);
             }
 
@@ -280,7 +280,7 @@ export class UserConnection {
     }
 
     private OnRTCNegotiationNeeded = async () => {
-        logout("Negotiation needed for user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+        logout(this.OtherUserGUID, useLogs, "Negotiation needed for user. Conn GUID: ", this.GUID);
         try {
             await this.PerformNegotiation();   
         } catch (error) {
@@ -290,12 +290,12 @@ export class UserConnection {
     
     private OnRTCICEConnectionStateChange = () => {
         if (this.RTC) {
-            logout("Status changed to ", this.RTC.iceConnectionState, " user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+            logout(this.OtherUserGUID, useLogs, "Status changed to ", this.RTC.iceConnectionState, ". Conn GUID: ", this.GUID);
 
             if (this.RTC.iceConnectionState === "disconnected") {
-                logout("Closed ICE connection with user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+                logout(this.OtherUserGUID, useLogs, "Closed ICE connection with user. Conn GUID: ", this.GUID);
             } else if (this.RTC.iceConnectionState === "connected") {
-                logout("Connected with user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+                logout(this.OtherUserGUID, useLogs, "Connected with user. Conn GUID: ", this.GUID);
                 this.OnStatusChange("connected");
             }
         }
@@ -310,11 +310,11 @@ export class UserConnection {
     }
 
     private OnRTCICECandidateError = (event: RTCPeerConnectionIceErrorEvent) => {
-        logout("Got ICE error on connection with user: ", this.OtherUserGUID, ". GUID: ", this.GUID, "Error code: ", event.errorCode, " Error text: ", event.errorText);
+        logout(this.OtherUserGUID, useLogs, "Got ICE error on connection with user. Conn GUID: ", this.GUID, "Error code: ", event.errorCode, " Error text: ", event.errorText);
     }
 
     private OnRTCDataChannel = async (event: RTCDataChannelEvent) => {
-        logout("Got data channel from user: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+        logout(this.OtherUserGUID, useLogs, "Got data channel from user. Conn GUID: ", this.GUID);
         event.channel.addEventListener("close", this.OnRTCDataChannelClose);
         event.channel.addEventListener("open", this.OnRTCDataChannelOpen);
         event.channel.addEventListener("message", this.OnRTCDataChannelMessage);
@@ -322,12 +322,12 @@ export class UserConnection {
     }
 
     private OnRTCDataChannelOpen = () => {
-        logout("OnRTCDataChannelOpen user_Guid: ", this.OtherUserGUID)
+        logout(this.OtherUserGUID, useLogs, "OnRTCDataChannelOpen")
         this.OnOpenDataChannel(this.OtherUserGUID)
     }
     
     private OnRTCDataChannelClose = () => {
-        logout("Closed data channel with: ", this.OtherUserGUID, ". GUID: ", this.GUID);
+        logout(this.OtherUserGUID, useLogs, "Closed data channel with user. Conn GUID: ", this.GUID);
         this.OnStatusChange("disconnected");
     }
 

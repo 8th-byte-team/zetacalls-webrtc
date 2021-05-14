@@ -1,6 +1,7 @@
 import { OrderedMap } from "immutable";
+import { logout } from "./utils";
 
-let logout = false;
+let useLogs = false;
 
 export class AudioOut {
     private AudioRootElement: HTMLAudioElement | null = null;
@@ -43,7 +44,7 @@ export class AudioOut {
     }
 
     public async AddStream(guid: string, stream: MediaStream) {
-        logout && console.log("add str user_Guid: ", guid, " Enabled: ", stream.getTracks()[0].enabled);
+        logout(guid, useLogs, "Add user audio. Enabled: ", stream.getTracks()[0].enabled);
         let output = document.getElementById(`audio-out-${guid}`) as HTMLAudioElement;
 
         if (!output) {
@@ -62,7 +63,7 @@ export class AudioOut {
     }
 
     public RemoveStream(guid: string) {
-        logout && console.log("remove str user_Guid: ", guid);
+        logout(guid, useLogs, "Remove user audio");
         this.Streams = this.Streams.remove(guid);
         const output = document.getElementById(`audio-out-${guid}`);
         output?.remove();
@@ -70,7 +71,7 @@ export class AudioOut {
 
     public ToggleStream(guid: string, status: boolean) {
         const stream = this.Streams.get(guid);
-        logout && console.log("toggle str user_Guid: ", guid, " Enabled: ", stream?.getTracks()[0].enabled);
+        logout(guid, useLogs, "Toggle user audio. Enabled: ", stream?.getTracks()[0].enabled);
         if (stream) {
             stream.getTracks().forEach(t => t.enabled = status);
             this.Streams = this.Streams.set(guid, stream);
